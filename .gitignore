@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/binaries/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project files
+projects/*.json
+!projects/example.json

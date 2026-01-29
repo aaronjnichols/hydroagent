@@ -1,0 +1,23 @@
+[project]
+name = "hydro-agent"
+version = "0.1.0"
+description = "Hydrologic/hydraulic/gis tools for water resources engineers"
+authors = [
+    { name = "Hydro Agent", email = "info@hydroagent.com" }
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic>=2.0.0",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build-meta"

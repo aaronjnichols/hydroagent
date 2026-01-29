@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "name": "Trapezoidal Channel Design",
+  "created": "2026-01-23T17:00:00.000Z",
+  "modified": "2026-01-23T17:00:00.000Z",
+  "scenarios": [
+    {
+      "id": "design-35ft",
+      "title": "35ft Width Design",
+      "notes": "Designed for 2000 cfs. Depth < 5ft, Velocity < 15 fps.",
+      "module": "manning.channels",
+      "inputs": {
+        "type": "trapezoidal",
+        "solveFor": "depth",
+        "discharge": 2000,
+        "width": 35,
+        "leftSideSlope": 2,
+        "rightSideSlope": 2,
+        "slope": 0.001,
+        "manningsN": 0.013,
+        "units": "imperial"
+      }
+    },
+    {
+      "id": "design-40ft",
+      "title": "40ft Width Design",
+      "notes": "Alternative design with more freeboard.",
+      "module": "manning.channels",
+      "inputs": {
+        "type": "trapezoidal",
+        "solveFor": "depth",
+        "discharge": 2000,
+        "width": 40,
+        "leftSideSlope": 1.5,
+        "rightSideSlope": 1.5,
+        "slope": 0.001,
+        "manningsN": 0.013,
+        "units": "imperial"
+      }
+    }
+  ]
+}

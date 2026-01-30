@@ -322,7 +322,7 @@ const ChannelCalculator = ({ scenario, onUpdate, precision, handlePrecisionChang
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type, 
-          solve_for: solveFor || 'depth',
+          solve_for: solveFor || (type === 'gutter' ? 'spread' : 'depth'),
           discharge: solveFor === 'discharge' ? null : discharge, 
           bottom_width: width, 
           side_slope: sideSlope,
@@ -340,10 +340,19 @@ const ChannelCalculator = ({ scenario, onUpdate, precision, handlePrecisionChang
           known_wse: waterSurfaceElevation
         })
       });
+      
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || 'Calculation failed');
+        let errorMessage = 'Calculation failed';
+        try {
+          const errData = await response.json();
+          errorMessage = errData.detail || errorMessage;
+        } catch (e) {
+          // If not JSON, maybe use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
+      
       const data = await response.json();
       const isIrregular = type === 'irregular';
       const minElev = isIrregular && irregularPoints?.length ? Math.min(...irregularPoints.map(p => p[1])) : null;
@@ -414,11 +423,11 @@ const ChannelCalculator = ({ scenario, onUpdate, precision, handlePrecisionChang
       )}
 
       <div className="flex bg-[#1a1a1a] p-1 rounded border border-[#2e2e2e] mb-8 w-full max-w-md mx-auto">
-        <TypeBtn active={scenario.type === 'rectangular'} onClick={() => onUpdate({ type: 'rectangular' })} label="Rectangular" />
-        <TypeBtn active={scenario.type === 'trapezoidal'} onClick={() => onUpdate({ type: 'trapezoidal' })} label="Trapezoidal" />
-        <TypeBtn active={scenario.type === 'triangular'} onClick={() => onUpdate({ type: 'triangular' })} label="Triangular" />
-        <TypeBtn active={scenario.type === 'irregular'} onClick={() => onUpdate({ type: 'irregular' })} label="Irregular" />
-        <TypeBtn active={scenario.type === 'gutter'} onClick={() => onUpdate({ type: 'gutter' })} label="Gutter" />
+        <TypeBtn active={scenario.type === 'rectangular'} onClick={() => onUpdate({ type: 'rectangular', solveFor: scenario.solveFor === 'spread' ? 'depth' : scenario.solveFor })} label="Rectangular" />
+        <TypeBtn active={scenario.type === 'trapezoidal'} onClick={() => onUpdate({ type: 'trapezoidal', solveFor: scenario.solveFor === 'spread' ? 'depth' : scenario.solveFor })} label="Trapezoidal" />
+        <TypeBtn active={scenario.type === 'triangular'} onClick={() => onUpdate({ type: 'triangular', solveFor: scenario.solveFor === 'spread' ? 'depth' : scenario.solveFor })} label="Triangular" />
+        <TypeBtn active={scenario.type === 'irregular'} onClick={() => onUpdate({ type: 'irregular', solveFor: scenario.solveFor === 'spread' ? 'depth' : scenario.solveFor })} label="Irregular" />
+        <TypeBtn active={scenario.type === 'gutter'} onClick={() => onUpdate({ type: 'gutter', solveFor: 'spread' })} label="Gutter" />
       </div>
 
       <div className="bg-[#1a1a1a] border border-[#2e2e2e] rounded-md p-6 mb-8 shadow-xl">

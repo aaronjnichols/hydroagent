@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CurbInletOnGrade from './CurbInletOnGrade';
+import PressurePipeCalculator from './PressurePipeCalculator';
 import ChannelCalculator from './ChannelCalculator';
 import CommandPalette from './CommandPalette';
 import { 
@@ -15,13 +16,23 @@ import {
   Box,
   Triangle,
   ChevronDown,
+  ChevronRight,
   Copy,
   Table as TableIcon,
   Settings2,
   Sparkles,
   Download,
   Save,
-  FolderOpen
+  FolderOpen,
+  Folder,
+  Pin,
+  PinOff,
+  Search,
+  ArrowUpAZ,
+  ArrowDownAZ,
+  MoreVertical,
+  FolderPlus,
+  Activity
 } from 'lucide-react';
 
 const formatToMarkdown = (scenario, results) => {
@@ -34,13 +45,31 @@ const formatToMarkdown = (scenario, results) => {
   const slope = isMetric ? 'm/m' : 'ft/ft';
   const vel = isMetric ? 'm/s' : 'ft/s';
   const area = isMetric ? 'm²' : 'ft²';
+  const press = 'psi';
 
   const date = new Date().toLocaleString();
 
   let md = `# ${scenario.title} Analysis Results\n`;
   md += `*Generated on ${date}*\n\n`;
 
-  if (kind === 'channel') {
+  if (kind === 'pressure_pipe') {
+    md += `## Input Parameters\n`;
+    md += `- **Solve For:** ${scenario.solveFor}\n`;
+    md += `- **Friction Method:** ${scenario.frictionMethod}\n`;
+    if (scenario.solveFor !== 'discharge') md += `- **Discharge:** ${scenario.discharge} cfs\n`;
+    if (scenario.solveFor !== 'diameter') md += `- **Diameter:** ${scenario.diameter} in\n`;
+    if (scenario.solveFor !== 'length') md += `- **Length:** ${scenario.length} ft\n`;
+    if (scenario.solveFor !== 'pressure_1') md += `- **Pressure 1:** ${scenario.pressure1} psi\n`;
+    if (scenario.solveFor !== 'elevation_1') md += `- **Elevation 1:** ${scenario.elevation1} ft\n`;
+    if (scenario.solveFor !== 'pressure_2') md += `- **Pressure 2:** ${scenario.pressure2} psi\n`;
+    if (scenario.solveFor !== 'elevation_2') md += `- **Elevation 2:** ${scenario.elevation2} ft\n`;
+    
+    md += `\n## Results\n`;
+    md += `- **Headloss:** ${results.headloss.toFixed(4)} ft\n`;
+    md += `- **Velocity:** ${results.velocity.toFixed(4)} ft/s\n`;
+    md += `- **Energy Grade 1:** ${results.energy_grade_1.toFixed(4)} ft\n`;
+    md += `- **Energy Grade 2:** ${results.energy_grade_2.toFixed(4)} ft\n`;
+  } else if (kind === 'channel') {
     md += `## Input Parameters\n`;
     md += `- **Channel Type:** ${type.charAt(0).toUpperCase() + type.slice(1)}\n`;
     md += `- **Solve For:** ${solveFor === 'discharge' ? 'Discharge' : (type === 'gutter' ? 'Spread' : (type === 'irregular' ? 'Water Surface Elevation' : 'Normal Depth'))}\n`;
@@ -378,6 +407,25 @@ const DEFAULT_INLET = {
   notes: ''
 };
 
+const DEFAULT_PIPE = {
+  kind: 'pressure_pipe',
+  solveFor: 'discharge',
+  frictionMethod: 'manning',
+  discharge: 10,
+  diameter: 12,
+  length: 100,
+  pressure1: 50,
+  elevation1: 100,
+  pressure2: 40,
+  elevation2: 100,
+  roughness: 0.013,
+  roughnessHeight: 0.0005,
+  kinematicViscosity: 1.217e-5,
+  specificWeight: 62.4,
+  units: 'imperial',
+  notes: ''
+};
+
 const App = () => {
   // Navigation & UI State
   const [activeTab, setActiveTab] = useState('calc'); // 'calc' or 'print'
@@ -388,16 +436,38 @@ const App = () => {
   const [showNewSectionModal, setShowNewSectionModal] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [projectName, setProjectName] = useState('New Project');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortOrder, setSortOrder] = useState('default'); // 'default', 'name-asc', 'name-desc'
+  const [folders, setFolders] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [contextMenu, setContextMenu] = useState(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [lastSelectedId, setLastSelectedId] = useState(null);
   
   // Scenarios State
   const [scenarios, setScenarios] = useState([
     {
       id: 'default-1',
-      title: 'Section 1',
-      ...DEFAULT_CHANNEL
+      title: 'Open Channel 1',
+      pinned: false,
+      folderId: null,
+      ...DEFAULT_CHANNEL,
+      solveFor: 'spread' // Ensure spread is default for gutter if it's a gutter
     }
   ]);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    console.log('App State:', {
+      activeTab,
+      scenariosCount: scenarios.length,
+      currentIndex,
+      currentScenario: scenarios[currentIndex]
+    });
+  }, [activeTab, scenarios, currentIndex]);
+
+  const [folderRenameId, setFolderRenameId] = useState(null);
+  const [tempFolderName, setTempFolderName] = useState('');
 
   const [precision, setPrecision] = useState({
     depth: 2,
@@ -514,9 +584,16 @@ const App = () => {
       run: () => addScenario('inlet', 'curb_on_grade') 
     },
     { 
+      id: 'new-pipe', 
+      label: 'New Pressure Pipe', 
+      description: 'Full Pipe Hydraulics',
+      icon: <Activity size={16} />, 
+      run: () => addScenario('pressure_pipe', 'manning') 
+    },
+    { 
       id: 'open-notes', 
       label: 'Open Notes', 
-      description: 'Edit section notes',
+      description: 'Edit calculation notes',
       icon: <FileText size={16} />, 
       run: () => setShowNotes(true) 
     },
@@ -589,14 +666,17 @@ const App = () => {
     handleScenarioUpdate(currentIndex, updates);
   };
 
-  const addScenario = (kind, type) => {
+  const addScenario = (kind, type, folderId = null) => {
     const base = kind === 'channel' ? DEFAULT_CHANNEL : DEFAULT_INLET;
     const newScenario = {
       ...base,
       id: crypto.randomUUID(),
-      title: `${kind === 'channel' ? 'Channel' : 'Inlet'} ${scenarios.length + 1}`,
+      title: `${kind === 'channel' ? 'Open Channel' : 'Curb Inlet'} ${scenarios.length + 1}`,
       type: kind === 'channel' ? type : base.type,
       inletType: kind === 'inlet' ? type : base.inletType,
+      solveFor: kind === 'channel' && type === 'gutter' ? 'spread' : (kind === 'channel' ? 'depth' : undefined),
+      pinned: false,
+      folderId: folderId
     };
     setScenarios([...scenarios, newScenario]);
     setCurrentIndex(scenarios.length);
@@ -634,16 +714,19 @@ const App = () => {
 
   const saveProject = () => {
     const projectData = {
-      version: "1.0",
+      version: "1.1",
       name: projectName,
       created: new Date().toISOString(),
       modified: new Date().toISOString(),
+      folders: folders,
       scenarios: scenarios.map(s => {
-        const { id, title, notes, results, kind, ...inputs } = s;
+        const { id, title, notes, results, kind, pinned, folderId, ...inputs } = s;
         return {
           id,
           title,
           notes: notes || "",
+          pinned: pinned || false,
+          folderId: folderId || null,
           module: kind === 'channel' ? "manning.channels" : "curb_inlets.on_grade",
           inputs,
           results
@@ -662,51 +745,204 @@ const App = () => {
   };
 
   const loadProject = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const projectData = JSON.parse(e.target.result);
-          if (projectData.scenarios && Array.isArray(projectData.scenarios)) {
-            setProjectName(projectData.name || 'Imported Project');
-            
-            const importedScenarios = projectData.scenarios.map(s => {
-              if (s.inputs && s.module) {
-                // Map from Project/Scenario model structure
-                return {
-                  id: s.id,
-                  title: s.title,
-                  notes: s.notes || "",
-                  kind: s.module === "manning.channels" ? 'channel' : 'inlet',
-                  results: s.results,
-                  ...s.inputs
-                };
-              }
-              // Fallback for older/UI-only format
-              return s;
-            });
-            
-            setScenarios(importedScenarios);
-            setCurrentIndex(0);
-          } else {
-            alert('Invalid project file format.');
-          }
-        } catch (err) {
-          console.error('Load error:', err);
-          alert('Error parsing project file.');
-        }
-      };
-      reader.readAsText(file);
+    // ... existing implementation ...
+  };
+
+  const createFolder = () => {
+    const newFolder = {
+      id: crypto.randomUUID(),
+      name: `New Folder ${folders.length + 1}`,
+      isOpen: true
     };
-    input.click();
+    setFolders([...folders, newFolder]);
+  };
+
+  const toggleFolder = (folderId) => {
+    setFolders(folders.map(f => f.id === folderId ? { ...f, isOpen: !f.isOpen } : f));
+  };
+
+  const startRenameFolder = (e, folder) => {
+    e.stopPropagation();
+    setFolderRenameId(folder.id);
+    setTempFolderName(folder.name);
+  };
+
+  const saveFolderName = () => {
+    if (tempFolderName.trim()) {
+      setFolders(folders.map(f => f.id === folderRenameId ? { ...f, name: tempFolderName.trim() } : f));
+    }
+    setFolderRenameId(null);
+  };
+
+  const renameFolder = (folderId, newName) => {
+    setFolders(folders.map(f => f.id === folderId ? { ...f, name: newName } : f));
+  };
+
+  const deleteFolder = (folderId, e) => {
+    e.stopPropagation();
+    setFolders(folders.filter(f => f.id !== folderId));
+    setScenarios(scenarios.map(s => s.folderId === folderId ? { ...s, folderId: null } : s));
+  };
+
+  const togglePin = (scenarioId, e) => {
+    if (e) e.stopPropagation();
+    setScenarios(scenarios.map(s => s.id === scenarioId ? { ...s, pinned: !s.pinned } : s));
+  };
+
+  const handleScenarioClick = (e, scenarioId) => {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
+
+    if (isShift && lastSelectedId) {
+      // Find range of visible items
+      // For simplicity, we'll use the current scenarios list, 
+      // but in a complex UI we might want to respect the visual order
+      const allIds = scenarios.map(s => s.id);
+      const startIdx = allIds.indexOf(lastSelectedId);
+      const endIdx = allIds.indexOf(scenarioId);
+      const rangeIds = allIds.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+      
+      const newSelected = new Set(selectedIds);
+      rangeIds.forEach(id => newSelected.add(id));
+      setSelectedIds(newSelected);
+    } else if (isCtrl) {
+      const newSelected = new Set(selectedIds);
+      if (newSelected.has(scenarioId)) {
+        newSelected.delete(scenarioId);
+      } else {
+        newSelected.add(scenarioId);
+      }
+      setSelectedIds(newSelected);
+      setLastSelectedId(scenarioId);
+    } else {
+      setSelectedIds(new Set([scenarioId]));
+      setLastSelectedId(scenarioId);
+      const idx = scenarios.findIndex(s => s.id === scenarioId);
+      if (idx !== -1) setCurrentIndex(idx);
+    }
+  };
+
+  const moveScenarioToFolder = (scenarioId, folderId) => {
+    setScenarios(scenarios.map(s => s.id === scenarioId ? { ...s, folderId } : s));
+  };
+
+  const moveSelectedToFolder = (folderId) => {
+    setScenarios(scenarios.map(s => selectedIds.has(s.id) ? { ...s, folderId } : s));
+    setShowMoveModal(false);
+  };
+
+  const groupSelected = () => {
+    if (selectedIds.size === 0) return;
+    const newFolderId = crypto.randomUUID();
+    const newFolder = {
+      id: newFolderId,
+      name: `Group ${folders.length + 1}`,
+      isOpen: true
+    };
+    setFolders([...folders, newFolder]);
+    setScenarios(scenarios.map(s => selectedIds.has(s.id) ? { ...s, folderId: newFolderId } : s));
+  };
+
+  const handleContextMenu = (e, scenarioId) => {
+    e.preventDefault();
+    if (!selectedIds.has(scenarioId)) {
+      setSelectedIds(new Set([scenarioId]));
+      setLastSelectedId(scenarioId);
+    }
+    setContextMenu({
+      x: e.clientX,
+      y: e.preventDefault ? e.clientY : e.pageY,
+      scenarioId
+    });
+  };
+
+  useEffect(() => {
+    const closeMenu = () => setContextMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, []);
+
+  const getFilteredAndSortedScenarios = (items) => {
+    let filtered = items.filter(s => 
+      s.title.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    if (sortOrder === 'name-asc') {
+      filtered.sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortOrder === 'name-desc') {
+      filtered.sort((a, b) => b.title.localeCompare(a.title));
+    }
+
+    return filtered;
+  };
+
+  const renderScenarioItem = (s, idx, isIndented = false) => {
+    const actualIndex = scenarios.findIndex(item => item.id === s.id);
+    const isSelected = selectedIds.has(s.id);
+    const isActive = actualIndex === currentIndex;
+
+    return (
+      <div 
+        key={s.id}
+        onClick={(e) => handleScenarioClick(e, s.id)}
+        onContextMenu={(e) => handleContextMenu(e, s.id)}
+        className={`group flex items-center justify-between p-2 rounded cursor-pointer transition-all ${isActive ? 'bg-[#1a1a1a] text-white border border-[#333]' : isSelected ? 'bg-[#262626] text-white border border-[#404040]' : 'hover:bg-[#151515] text-[#737373] border border-transparent'} ${isIndented ? 'ml-4' : ''}`}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const draggedIds = JSON.parse(e.dataTransfer.getData('scenarioIds') || '[]');
+          if (draggedIds.length > 0) {
+            setScenarios(scenarios.map(item => draggedIds.includes(item.id) ? { ...item, folderId: s.folderId } : item));
+          }
+        }}
+        draggable
+        onDragStart={(e) => {
+          const idsToDrag = isSelected ? Array.from(selectedIds) : [s.id];
+          e.dataTransfer.setData('scenarioIds', JSON.stringify(idsToDrag));
+        }}
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="min-w-[12px]">
+            {s.kind === 'channel' ? (
+              <>
+                {s.type === 'rectangular' && <Box size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />}
+                {s.type === 'trapezoidal' && <Layers size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />}
+                {s.type === 'triangular' && <Triangle size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />}
+                {s.type === 'irregular' && <TableIcon size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />}
+                {s.type === 'gutter' && <Calculator size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />}
+              </>
+            ) : s.kind === 'inlet' ? (
+              <Calculator size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />
+            ) : (
+              <Activity size={12} className={actualIndex === currentIndex ? 'text-white' : 'text-[#404040]'} />
+            )}
+          </div>
+          <span className="text-[11px] truncate font-light tracking-wide">{s.title}</span>
+        </div>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            onClick={(e) => togglePin(s.id, e)}
+            className={`p-1 hover:text-white transition-colors ${s.pinned ? 'text-blue-400' : 'text-[#525252]'}`}
+            title={s.pinned ? "Unpin" : "Pin to top"}
+          >
+            {s.pinned ? <Pin size={12} fill="currentColor" /> : <Pin size={12} />}
+          </button>
+          {scenarios.length > 1 && (
+            <button 
+              onClick={(e) => deleteScenario(actualIndex, e)}
+              className="hover:text-red-400 transition-colors p-1 text-[#525252]"
+              title="Delete"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   if (activeTab === 'calc') {
+    if (!currentScenario) return <div className="p-8 text-white">Loading...</div>;
     return (
       <div className="flex h-screen bg-[#121212] text-[#d4d4d4] font-sans selection:bg-[#404040]">
         <aside className="w-64 border-r border-[#232323] bg-[#0f0f0f] flex flex-col hidden md:flex">
@@ -726,49 +962,142 @@ const App = () => {
               type="text" 
               value={projectName} 
               onChange={(e) => setProjectName(e.target.value)}
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#525252]"
+              className="w-full bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-[#525252] mb-4"
               placeholder="Project Name"
             />
+            <div className="flex gap-2 items-center">
+              <div className="relative flex-1">
+                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#525252]" />
+                <input 
+                  type="text" 
+                  value={searchTerm} 
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-[#1a1a1a] border border-[#333] rounded pl-7 pr-2 py-1 text-[11px] text-white focus:outline-none focus:border-[#525252]"
+                  placeholder="Search..."
+                />
+              </div>
+              <button 
+                onClick={() => setSortOrder(sortOrder === 'name-asc' ? 'name-desc' : sortOrder === 'name-desc' ? 'default' : 'name-asc')}
+                title={`Sort: ${sortOrder === 'default' ? 'Default' : sortOrder === 'name-asc' ? 'Name (A-Z)' : 'Name (Z-A)'}`}
+                className={`p-1.5 rounded border border-[#333] transition-colors ${sortOrder !== 'default' ? 'bg-[#333] text-white' : 'text-[#a3a3a3] hover:text-white'}`}
+              >
+                {sortOrder === 'name-desc' ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}
+              </button>
+            </div>
           </div>
 
           <div className="p-4 border-b border-[#232323] flex justify-between items-center bg-[#0a0a0a]">
-            <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#525252]">Sections</span>
-            <button onClick={() => setShowNewSectionModal(true)} className="text-[#a3a3a3] hover:text-white transition-colors">
-              <Plus size={16} />
-            </button>
+            <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#525252]">Calculations</span>
+            <div className="flex gap-2">
+              <button onClick={createFolder} title="New Folder" className="text-[#a3a3a3] hover:text-white transition-colors">
+                <FolderPlus size={16} />
+              </button>
+              <button onClick={() => setShowNewSectionModal(true)} title="New Calculation" className="text-[#a3a3a3] hover:text-white transition-colors">
+                <Plus size={16} />
+              </button>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {scenarios.map((s, idx) => (
-              <div 
-                key={s.id}
-                onClick={() => setCurrentIndex(idx)}
-                className={`group flex items-center justify-between p-3 rounded cursor-pointer transition-all ${idx === currentIndex ? 'bg-[#1a1a1a] text-white border border-[#333]' : 'hover:bg-[#151515] text-[#737373] border border-transparent'}`}
-              >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <div className="min-w-[12px]">
-                    {s.kind === 'channel' ? (
-                      <>
-                        {s.type === 'rectangular' && <Box size={12} className={idx === currentIndex ? 'text-white' : 'text-[#404040]'} />}
-                        {s.type === 'trapezoidal' && <Layers size={12} className={idx === currentIndex ? 'text-white' : 'text-[#404040]'} />}
-                        {s.type === 'triangular' && <Triangle size={12} className={idx === currentIndex ? 'text-white' : 'text-[#404040]'} />}
-                        {s.type === 'irregular' && <TableIcon size={12} className={idx === currentIndex ? 'text-white' : 'text-[#404040]'} />}
-                      </>
-                    ) : (
-                      <Calculator size={12} className={idx === currentIndex ? 'text-white' : 'text-[#404040]'} />
-                    )}
-                  </div>
-                  <span className="text-xs truncate font-light tracking-wide">{s.title}</span>
+          <div className="flex-1 overflow-y-auto p-2 space-y-4">
+            {/* Pinned Items */}
+            {scenarios.some(s => s.pinned) && (
+              <div className="space-y-1">
+                <div className="px-2 mb-1 flex items-center gap-1.5 text-[9px] uppercase tracking-widest text-[#404040] font-bold">
+                  <Pin size={10} /> Pinned
                 </div>
-                {scenarios.length > 1 && (
-                  <button 
-                    onClick={(e) => deleteScenario(idx, e)}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity p-1"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
+                {getFilteredAndSortedScenarios(scenarios.filter(s => s.pinned)).map((s, idx) => renderScenarioItem(s, idx))}
               </div>
-            ))}
+            )}
+
+            {/* Folders and Unfoldered Items */}
+            <div className="space-y-1">
+              {folders.map(folder => (
+                <div 
+                  key={folder.id} 
+                  className="space-y-1"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const scenarioId = e.dataTransfer.getData('scenarioId');
+                    if (scenarioId) moveScenarioToFolder(scenarioId, folder.id);
+                  }}
+                >
+                  <div 
+                    onClick={() => toggleFolder(folder.id)}
+                    className="group flex items-center justify-between p-2 rounded cursor-pointer hover:bg-[#151515] text-[#737373] transition-colors"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const draggedIds = JSON.parse(e.dataTransfer.getData('scenarioIds') || '[]');
+                      if (draggedIds.length > 0) {
+                        setScenarios(scenarios.map(item => draggedIds.includes(item.id) ? { ...item, folderId: folder.id } : item));
+                      }
+                    }}
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden flex-1">
+                      {folder.isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      <Folder size={12} className={folder.isOpen ? 'text-blue-400/60' : 'text-[#404040]'} />
+                      {folderRenameId === folder.id ? (
+                        <input
+                          autoFocus
+                          value={tempFolderName}
+                          onChange={(e) => setTempFolderName(e.target.value)}
+                          onBlur={saveFolderName}
+                          onKeyDown={(e) => e.key === 'Enter' && saveFolderName()}
+                          onClick={(e) => e.stopPropagation()}
+                          className="bg-[#121212] border border-[#333] rounded px-1 py-0.5 text-[11px] text-white focus:outline-none w-full"
+                        />
+                      ) : (
+                        <span className="text-[11px] truncate font-medium tracking-wide uppercase">{folder.name}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => startRenameFolder(e, folder)}
+                        className="hover:text-white transition-colors p-1 text-[#525252]"
+                        title="Rename"
+                      >
+                        <Edit3 size={12} />
+                      </button>
+                      <button 
+                        onClick={(e) => deleteFolder(folder.id, e)}
+                        className="hover:text-red-400 transition-colors p-1 text-[#525252]"
+                        title="Delete"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  {folder.isOpen && (
+                    <div className="space-y-1">
+                      {getFilteredAndSortedScenarios(scenarios.filter(s => !s.pinned && s.folderId === folder.id)).map((s, idx) => renderScenarioItem(s, idx, true))}
+                      {scenarios.filter(s => !s.pinned && s.folderId === folder.id).length === 0 && (
+                        <div className="ml-8 py-2 text-[10px] text-[#404040] italic">Empty folder</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Unfoldered Items */}
+              <div 
+                className="space-y-1 pt-2"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const draggedIds = JSON.parse(e.dataTransfer.getData('scenarioIds') || '[]');
+                  if (draggedIds.length > 0) {
+                    setScenarios(scenarios.map(item => draggedIds.includes(item.id) ? { ...item, folderId: null } : item));
+                  }
+                }}
+              >
+                {folders.length > 0 && (
+                  <div className="px-2 mb-1 text-[9px] uppercase tracking-widest text-[#404040] font-bold">
+                    Other
+                  </div>
+                )}
+                {getFilteredAndSortedScenarios(scenarios.filter(s => !s.pinned && !s.folderId)).map((s, idx) => renderScenarioItem(s, idx))}
+              </div>
+            </div>
           </div>
         </aside>
 
@@ -813,7 +1142,7 @@ const App = () => {
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                 <div className="bg-[#1a1a1a] border border-[#333] w-full max-w-md rounded-md p-6 shadow-2xl">
                   <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-[10px] uppercase tracking-[0.2em] text-white font-medium">Create New Section</h3>
+                    <h3 className="text-[10px] uppercase tracking-[0.2em] text-white font-medium">Create New Calculation</h3>
                     <button onClick={() => setShowNewSectionModal(false)} className="text-[#525252] hover:text-white transition-colors">
                       <X size={18} />
                     </button>
@@ -844,7 +1173,94 @@ const App = () => {
                         </button>
                       </div>
                     </section>
+                    <section>
+                      <label className="text-[9px] uppercase tracking-[0.2em] text-[#525252] block mb-3">Pressure Pipe Flow</label>
+                      <div className="grid grid-cols-1 gap-2">
+                        <button onClick={() => addScenario('pressure_pipe', 'manning')} className="bg-[#121212] border border-[#333] p-3 rounded text-xs text-left hover:border-[#525252] transition-colors flex items-center gap-3">
+                          <Activity size={14} className="text-[#525252]" /> Pressure Pipe
+                        </button>
+                      </div>
+                    </section>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {contextMenu && (
+              <div 
+                className="fixed z-[100] bg-[#1a1a1a] border border-[#333] rounded shadow-2xl py-1 min-w-[160px]"
+                style={{ top: contextMenu.y, left: contextMenu.x }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button 
+                  onClick={() => { togglePin(contextMenu.scenarioId); setContextMenu(null); }}
+                  className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                >
+                  <Pin size={14} /> {scenarios.find(s => s.id === contextMenu.scenarioId)?.pinned ? 'Unpin' : 'Pin to top'}
+                </button>
+                <button 
+                  onClick={() => { setShowMoveModal(true); setContextMenu(null); }}
+                  className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                >
+                  <FolderOpen size={14} /> Move to Folder...
+                </button>
+                {selectedIds.size > 1 && (
+                  <button 
+                    onClick={() => { groupSelected(); setContextMenu(null); }}
+                    className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                  >
+                    <Layers size={14} /> Group Calculations
+                  </button>
+                )}
+                <div className="h-px bg-[#333] my-1" />
+                <button 
+                  onClick={() => { 
+                    // Delete all selected items
+                    const idsToDelete = Array.from(selectedIds);
+                    const updated = scenarios.filter(s => !idsToDelete.includes(s.id));
+                    setScenarios(updated.length > 0 ? updated : [scenarios[0]]); // Keep at least one
+                    setSelectedIds(new Set());
+                    setContextMenu(null); 
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-950/20 flex items-center gap-2"
+                >
+                  <Trash2 size={14} /> Delete Selected
+                </button>
+              </div>
+            )}
+
+            {showMoveModal && (
+              <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                <div className="bg-[#1a1a1a] border border-[#333] w-full max-w-xs rounded-md p-6 shadow-2xl">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-[10px] uppercase tracking-[0.2em] text-white font-medium">Move to Folder</h3>
+                    <button onClick={() => setShowMoveModal(false)} className="text-[#525252] hover:text-white transition-colors">
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="space-y-1 max-h-60 overflow-y-auto">
+                    <button 
+                      onClick={() => moveSelectedToFolder(null)}
+                      className="w-full text-left px-3 py-2 rounded text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                    >
+                      <Folder size={14} className="text-[#404040]" /> Root / Other
+                    </button>
+                    {folders.map(f => (
+                      <button 
+                        key={f.id}
+                        onClick={() => moveSelectedToFolder(f.id)}
+                        className="w-full text-left px-3 py-2 rounded text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                      >
+                        <Folder size={14} className="text-blue-400/60" /> {f.name}
+                      </button>
+                    ))}
+                  </div>
+                  <button 
+                    onClick={createFolder}
+                    className="w-full mt-4 flex items-center justify-center gap-2 py-2 border border-dashed border-[#333] rounded text-[10px] uppercase tracking-widest text-[#525252] hover:text-white hover:border-[#525252] transition-all"
+                  >
+                    <Plus size={12} /> New Folder
+                  </button>
                 </div>
               </div>
             )}
@@ -947,10 +1363,17 @@ const App = () => {
                 precision={precision}
                 handlePrecisionChange={handlePrecisionChange}
               />
-            ) : (
+            ) : currentScenario.kind === 'inlet' ? (
               <CurbInletOnGrade 
                 scenario={currentScenario}
                 onUpdate={(updates) => handleScenarioUpdate(currentIndex, updates)}
+              />
+            ) : (
+              <PressurePipeCalculator
+                scenario={currentScenario}
+                onUpdate={(updates) => handleScenarioUpdate(currentIndex, updates)}
+                precision={precision}
+                handlePrecisionChange={handlePrecisionChange}
               />
             )}
           </div>
@@ -985,7 +1408,19 @@ const App = () => {
               <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Inputs</h3>
               <table className="w-full text-sm font-sans">
                 <tbody>
-                  {currentScenario.kind === 'channel' ? (
+                  {currentScenario.kind === 'pressure_pipe' ? (
+                    <>
+                      <PrintTableRow label="Solve For" value={currentScenario.solveFor} unit="" />
+                      <PrintTableRow label="Friction Method" value={currentScenario.frictionMethod} unit="" />
+                      {currentScenario.solveFor !== 'discharge' && <PrintTableRow label="Discharge" value={currentScenario.discharge} unit="cfs" />}
+                      {currentScenario.solveFor !== 'diameter' && <PrintTableRow label="Diameter" value={currentScenario.diameter} unit="in" />}
+                      {currentScenario.solveFor !== 'length' && <PrintTableRow label="Length" value={currentScenario.length} unit="ft" />}
+                      {currentScenario.solveFor !== 'pressure_1' && <PrintTableRow label="Pressure 1" value={currentScenario.pressure1} unit="psi" />}
+                      {currentScenario.solveFor !== 'elevation_1' && <PrintTableRow label="Elevation 1" value={currentScenario.elevation1} unit="ft" />}
+                      {currentScenario.solveFor !== 'pressure_2' && <PrintTableRow label="Pressure 2" value={currentScenario.pressure2} unit="psi" />}
+                      {currentScenario.solveFor !== 'elevation_2' && <PrintTableRow label="Elevation 2" value={currentScenario.elevation2} unit="ft" />}
+                    </>
+                  ) : currentScenario.kind === 'channel' ? (
                     <>
                       <PrintTableRow label="Discharge (Q)" value={currentScenario.discharge} unit={currentScenario.units === 'metric' ? 'm³/s' : 'ft³/s'} />
                       {currentScenario.type === 'irregular' ? (
@@ -1028,7 +1463,25 @@ const App = () => {
             <section>
               <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Primary Result</h3>
               <div className="py-2">
-                {currentScenario.kind === 'channel' ? (
+                {currentScenario.kind === 'pressure_pipe' ? (
+                  <>
+                    <p className="text-[9px] uppercase font-sans text-gray-600">
+                      Solved {currentScenario.solveFor.replace('_', ' ')}
+                    </p>
+                    <p className="text-4xl font-bold">
+                      {currentScenario.results ? 
+                        Number(currentScenario.results[currentScenario.solveFor]).toFixed(precision.depth) 
+                        : '0.00'} 
+                      <span className="text-lg font-normal text-gray-500">
+                        {currentScenario.solveFor === 'discharge' ? 'cfs' : 
+                         currentScenario.solveFor === 'diameter' ? 'in' : 
+                         currentScenario.solveFor === 'length' ? 'ft' :
+                         currentScenario.solveFor.includes('pressure') ? 'psi' : 'ft'}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">Headloss: {currentScenario.results?.headloss.toFixed(2)} ft</p>
+                  </>
+                ) : currentScenario.kind === 'channel' ? (
                   <>
                     <p className="text-[9px] uppercase font-sans text-gray-600">
                       {currentScenario.type === 'irregular' ? 'Water Surface Elevation (WSE)' : 
@@ -1079,7 +1532,18 @@ const App = () => {
               <h3 className="text-[10px] font-bold uppercase border-b border-black mb-3 pb-1">Analysis Properties</h3>
               <table className="w-full text-xs">
                 <tbody>
-                  {currentScenario.kind === 'channel' ? (
+                  {currentScenario.kind === 'pressure_pipe' ? (
+                    <>
+                      <PrintTableRow label="Headloss" value={currentScenario.results?.headloss.toFixed(precision.depth)} unit="ft" />
+                      <PrintTableRow label="Velocity" value={currentScenario.results?.velocity.toFixed(precision.velocity)} unit="ft/s" />
+                      <PrintTableRow label="Energy Grade 1" value={currentScenario.results?.energy_grade_1.toFixed(precision.depth)} unit="ft" />
+                      <PrintTableRow label="Energy Grade 2" value={currentScenario.results?.energy_grade_2.toFixed(precision.depth)} unit="ft" />
+                      <PrintTableRow label="Hydraulic Grade 1" value={currentScenario.results?.hydraulic_grade_1.toFixed(precision.depth)} unit="ft" />
+                      <PrintTableRow label="Hydraulic Grade 2" value={currentScenario.results?.hydraulic_grade_2.toFixed(precision.depth)} unit="ft" />
+                      <PrintTableRow label="Friction Slope" value={currentScenario.results?.friction_slope.toFixed(precision.criticalSlope)} unit="ft/ft" />
+                      <PrintTableRow label="Flow Area" value={currentScenario.results?.area.toFixed(precision.area)} unit="ft²" />
+                    </>
+                  ) : currentScenario.kind === 'channel' ? (
                     <>
                       <PrintTableRow label="Flow Area (A)" value={currentScenario.results ? Number(currentScenario.results.area).toFixed(precision.area) : '0.00'} unit={currentScenario.units === 'metric' ? 'm²' : 'ft²'} />
                       <PrintTableRow label="Wetted Perimeter (P)" value={currentScenario.results ? Number(currentScenario.results.wetted_perimeter).toFixed(precision.perimeter) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />

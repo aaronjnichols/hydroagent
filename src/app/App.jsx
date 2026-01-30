@@ -383,8 +383,10 @@ const DEFAULT_CHANNEL = {
   manningsN: 0.013,
   units: 'imperial',
   notes: '',
-  irregularData: '',
-  irregularPoints: [],
+  irregularData: '0\t10\n20\t0\n30\t0\n50\t10',
+  irregularPoints: [[0, 10], [20, 0], [30, 0], [50, 10]],
+  waterSurfaceElevation: 5,
+  normalDepth: 5,
   gutterWidth: 2.0,
   gutterCrossSlope: 0.060,
   roadCrossSlope: 0.020,
@@ -671,13 +673,21 @@ const App = () => {
     const newScenario = {
       ...base,
       id: crypto.randomUUID(),
-      title: `${kind === 'channel' ? 'Open Channel' : 'Curb Inlet'} ${scenarios.length + 1}`,
+      title: `${kind === 'channel' ? (type === 'irregular' ? 'Irregular Channel' : (type === 'gutter' ? 'Gutter Flow' : 'Open Channel')) : 'Curb Inlet'} ${scenarios.length + 1}`,
       type: kind === 'channel' ? type : base.type,
       inletType: kind === 'inlet' ? type : base.inletType,
       solveFor: kind === 'channel' && type === 'gutter' ? 'spread' : (kind === 'channel' ? 'depth' : undefined),
       pinned: false,
       folderId: folderId
     };
+
+    // Set specific defaults for Irregular if needed (already in base, but title is nice)
+    if (type === 'irregular') {
+      newScenario.discharge = 100;
+      newScenario.slope = 0.005;
+      newScenario.manningsN = 0.035;
+    }
+
     setScenarios([...scenarios, newScenario]);
     setCurrentIndex(scenarios.length);
     setShowNewSectionModal(false);

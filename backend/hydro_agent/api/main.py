@@ -5,6 +5,8 @@ from ..core.manning.schemas import ChannelInput, ChannelResult
 from ..export.formatters import to_markdown, to_csv, to_plain_text
 from ..core.curb_inlets.on_grade import solve_curb_inlet_on_grade
 from ..core.curb_inlets.schemas import CurbInletOnGradeInput, CurbInletOnGradeResult
+from ..core.pressure_pipes.solver import solve_pressure_pipe
+from ..core.pressure_pipes.schemas import PressurePipeInput, PressurePipeResult
 from ..projects.models import Project, Scenario
 
 app = FastAPI(
@@ -70,6 +72,20 @@ async def solve_curb_inlet_on_grade_endpoint(params: CurbInletOnGradeInput):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/pressure-pipes/solve", response_model=PressurePipeResult)
+async def solve_pressure_pipe_endpoint(params: PressurePipeInput):
+    """
+    Solve for pressure pipe parameters using various friction methods.
+    """
+    try:
+        result = solve_pressure_pipe(params)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Error in pressure-pipes/solve: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/projects/validate", response_model=Project)

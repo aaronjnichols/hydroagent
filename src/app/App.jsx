@@ -669,14 +669,22 @@ const App = () => {
   };
 
   const addScenario = (kind, type, folderId = null) => {
-    const base = kind === 'channel' ? DEFAULT_CHANNEL : DEFAULT_INLET;
+    let base;
+    if (kind === 'channel') {
+      base = DEFAULT_CHANNEL;
+    } else if (kind === 'inlet') {
+      base = DEFAULT_INLET;
+    } else if (kind === 'pressure_pipe') {
+      base = DEFAULT_PIPE;
+    }
+
     const newScenario = {
       ...base,
       id: crypto.randomUUID(),
-      title: `${kind === 'channel' ? (type === 'irregular' ? 'Irregular Channel' : (type === 'gutter' ? 'Gutter Flow' : 'Open Channel')) : 'Curb Inlet'} ${scenarios.length + 1}`,
+      title: `${kind === 'channel' ? (type === 'irregular' ? 'Irregular Channel' : (type === 'gutter' ? 'Gutter Flow' : 'Open Channel')) : (kind === 'inlet' ? 'Curb Inlet' : 'Pressure Pipe')} ${scenarios.length + 1}`,
       type: kind === 'channel' ? type : base.type,
       inletType: kind === 'inlet' ? type : base.inletType,
-      solveFor: kind === 'channel' && type === 'gutter' ? 'spread' : (kind === 'channel' ? 'depth' : undefined),
+      solveFor: kind === 'channel' && type === 'gutter' ? 'spread' : (kind === 'channel' ? 'depth' : base.solveFor),
       pinned: false,
       folderId: folderId
     };
@@ -791,7 +799,9 @@ const App = () => {
   const deleteFolder = (folderId, e) => {
     e.stopPropagation();
     setFolders(folders.filter(f => f.id !== folderId));
-    setScenarios(scenarios.map(s => s.folderId === folderId ? { ...s, folderId: null } : s));
+    setScenarios(scenarios.filter(s => s.folderId !== folderId));
+    // Reset currentIndex if the deleted scenarios included the active one
+    setCurrentIndex(0);
   };
 
   const togglePin = (scenarioId, e) => {

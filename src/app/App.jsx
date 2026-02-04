@@ -445,6 +445,7 @@ const App = () => {
   const [contextMenu, setContextMenu] = useState(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [lastSelectedId, setLastSelectedId] = useState(null);
+  const [printIds, setPrintIds] = useState(null);
   
   // Scenarios State
   const [scenarios, setScenarios] = useState([
@@ -863,16 +864,19 @@ const App = () => {
     setScenarios(scenarios.map(s => selectedIds.has(s.id) ? { ...s, folderId: newFolderId } : s));
   };
 
-  const handleContextMenu = (e, scenarioId) => {
+  const handleContextMenu = (e, targetId, type = 'scenario') => {
     e.preventDefault();
-    if (!selectedIds.has(scenarioId)) {
-      setSelectedIds(new Set([scenarioId]));
-      setLastSelectedId(scenarioId);
+    if (type === 'scenario') {
+      if (!selectedIds.has(targetId)) {
+        setSelectedIds(new Set([targetId]));
+        setLastSelectedId(targetId);
+      }
     }
     setContextMenu({
       x: e.clientX,
       y: e.preventDefault ? e.clientY : e.pageY,
-      scenarioId
+      targetId,
+      type
     });
   };
 
@@ -1043,6 +1047,7 @@ const App = () => {
                 >
                   <div 
                     onClick={() => toggleFolder(folder.id)}
+                    onContextMenu={(e) => handleContextMenu(e, folder.id, 'folder')}
                     className="group flex items-center justify-between p-2 rounded cursor-pointer hover:bg-[#151515] text-[#737373] transition-colors"
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
@@ -1212,19 +1217,23 @@ const App = () => {
                 style={{ top: contextMenu.y, left: contextMenu.x }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <button 
-                  onClick={() => { togglePin(contextMenu.scenarioId); setContextMenu(null); }}
-                  className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
-                >
-                  <Pin size={14} /> {scenarios.find(s => s.id === contextMenu.scenarioId)?.pinned ? 'Unpin' : 'Pin to top'}
-                </button>
-                <button 
-                  onClick={() => { setShowMoveModal(true); setContextMenu(null); }}
-                  className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
-                >
-                  <FolderOpen size={14} /> Move to Folder...
-                </button>
-                {selectedIds.size > 1 && (
+                {contextMenu.type === 'scenario' && (
+                  <button 
+                    onClick={() => { togglePin(contextMenu.targetId); setContextMenu(null); }}
+                    className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                  >
+                    <Pin size={14} /> {scenarios.find(s => s.id === contextMenu.targetId)?.pinned ? 'Unpin' : 'Pin to top'}
+                  </button>
+                )}
+                {contextMenu.type === 'scenario' && (
+                  <button 
+                    onClick={() => { setShowMoveModal(true); setContextMenu(null); }}
+                    className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                  >
+                    <FolderOpen size={14} /> Move to Folder...
+                  </button>
+                )}
+                {contextMenu.type === 'scenario' && selectedIds.size > 1 && (
                   <button 
                     onClick={() => { groupSelected(); setContextMenu(null); }}
                     className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
@@ -1232,20 +1241,55 @@ const App = () => {
                     <Layers size={14} /> Group Calculations
                   </button>
                 )}
+                
+                {/* Batch Print Option */}
+                {(contextMenu.type === 'folder' || (contextMenu.type === 'scenario' && selectedIds.size > 1)) && (
+                  <button 
+                    onClick={() => {
+                      let idsToPrint = [];
+                      if (contextMenu.type === 'folder') {
+                        idsToPrint = scenarios.filter(s => s.folderId === contextMenu.targetId).map(s => s.id);
+                      } else {
+                        idsToPrint = Array.from(selectedIds);
+                      }
+                      if (idsToPrint.length > 0) {
+                        setPrintIds(idsToPrint);
+                        setActiveTab('print');
+                      }
+                      setContextMenu(null);
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-[#d4d4d4] hover:bg-[#262626] flex items-center gap-2"
+                  >
+                    <Printer size={14} /> Batch Print
+                  </button>
+                )}
+
                 <div className="h-px bg-[#333] my-1" />
-                <button 
-                  onClick={() => { 
-                    // Delete all selected items
-                    const idsToDelete = Array.from(selectedIds);
-                    const updated = scenarios.filter(s => !idsToDelete.includes(s.id));
-                    setScenarios(updated.length > 0 ? updated : [scenarios[0]]); // Keep at least one
-                    setSelectedIds(new Set());
-                    setContextMenu(null); 
-                  }}
-                  className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-950/20 flex items-center gap-2"
-                >
-                  <Trash2 size={14} /> Delete Selected
-                </button>
+                {contextMenu.type === 'scenario' ? (
+                  <button 
+                    onClick={() => { 
+                      // Delete all selected items
+                      const idsToDelete = Array.from(selectedIds);
+                      const updated = scenarios.filter(s => !idsToDelete.includes(s.id));
+                      setScenarios(updated.length > 0 ? updated : [scenarios[0]]); // Keep at least one
+                      setSelectedIds(new Set());
+                      setContextMenu(null); 
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-950/20 flex items-center gap-2"
+                  >
+                    <Trash2 size={14} /> Delete Selected
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => { 
+                      deleteFolder(contextMenu.targetId, { stopPropagation: () => {} });
+                      setContextMenu(null); 
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-red-400 hover:bg-red-950/20 flex items-center gap-2"
+                  >
+                    <Trash2 size={14} /> Delete Folder
+                  </button>
+                )}
               </div>
             )}
 
@@ -1402,223 +1446,232 @@ const App = () => {
     );
   }
 
+  const scenariosToPrint = printIds 
+    ? scenarios.filter(s => printIds.includes(s.id)) 
+    : [currentScenario];
+
   return (
     <div className="min-h-screen bg-white text-black font-serif p-8 md:p-16 flex flex-col items-center overflow-auto print:p-0">
       <div className="w-full max-w-[8.5in] bg-white print:max-w-full">
         <div className="mb-8 flex items-center gap-4 print:hidden font-sans">
-          <button onClick={() => setActiveTab('calc')} className="flex items-center gap-2 text-xs uppercase border border-black px-4 py-2"><ChevronLeft size={14} /> Back</button>
+          <button onClick={() => { setActiveTab('calc'); setPrintIds(null); }} className="flex items-center gap-2 text-xs uppercase border border-black px-4 py-2"><ChevronLeft size={14} /> Back</button>
+          <button onClick={() => setPrintIds(scenarios.map(s => s.id))} className="flex items-center gap-2 text-xs uppercase border border-black px-4 py-2"><Printer size={14} /> Print All</button>
           <button onClick={() => window.print()} className="flex items-center gap-2 text-xs uppercase bg-black text-white px-4 py-2"><Printer size={14} /> Print</button>
         </div>
 
-        <div className="border border-black p-6 md:p-10 space-y-8 print:p-0 print:border-0">
-          <header className="border-b-2 border-black pb-4 flex justify-between items-end">
-            <div>
-              <h1 className="text-2xl font-bold uppercase tracking-tight mb-1">{currentScenario.title}</h1>
-              <p className="text-xs font-sans uppercase tracking-widest text-gray-600 italic">
-                {currentScenario.kind === 'channel' ? `${currentScenario.type} Channel` : 'Curb Inlet'} Analysis
-              </p>
-            </div>
-            <div className="text-right text-[9px] font-sans uppercase text-gray-500">
-              Generated: {currentScenario.results?.timestamp || new Date().toLocaleString()}
-            </div>
-          </header>
+        <div className="space-y-8 print:space-y-0">
+          {scenariosToPrint.map((scenario, sIdx) => (
+            <div key={scenario.id} className={`border border-black p-6 md:p-10 space-y-8 print:p-0 print:border-0 ${sIdx < scenariosToPrint.length - 1 ? 'print:break-after-page mb-12 print:mb-0' : ''}`}>
+              <header className="border-b-2 border-black pb-4 flex justify-between items-end">
+                <div>
+                  <h1 className="text-2xl font-bold uppercase tracking-tight mb-1">{scenario.title}</h1>
+                  <p className="text-xs font-sans uppercase tracking-widest text-gray-600 italic">
+                    {scenario.kind === 'channel' ? `${scenario.type} Channel` : scenario.kind === 'inlet' ? 'Curb Inlet' : 'Pressure Pipe'} Analysis
+                  </p>
+                </div>
+                <div className="text-right text-[9px] font-sans uppercase text-gray-500">
+                  Generated: {scenario.results?.timestamp || new Date().toLocaleString()}
+                </div>
+              </header>
 
-          <div className="grid grid-cols-2 gap-8">
-            <section>
-              <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Inputs</h3>
-              <table className="w-full text-sm font-sans">
-                <tbody>
-                  {currentScenario.kind === 'pressure_pipe' ? (
-                    <>
-                      <PrintTableRow label="Solve For" value={currentScenario.solveFor} unit="" />
-                      <PrintTableRow label="Friction Method" value={currentScenario.frictionMethod} unit="" />
-                      {currentScenario.solveFor !== 'discharge' && <PrintTableRow label="Discharge" value={currentScenario.discharge} unit="cfs" />}
-                      {currentScenario.solveFor !== 'diameter' && <PrintTableRow label="Diameter" value={currentScenario.diameter} unit="in" />}
-                      {currentScenario.solveFor !== 'length' && <PrintTableRow label="Length" value={currentScenario.length} unit="ft" />}
-                      {currentScenario.solveFor !== 'pressure_1' && <PrintTableRow label="Pressure 1" value={currentScenario.pressure1} unit="psi" />}
-                      {currentScenario.solveFor !== 'elevation_1' && <PrintTableRow label="Elevation 1" value={currentScenario.elevation1} unit="ft" />}
-                      {currentScenario.solveFor !== 'pressure_2' && <PrintTableRow label="Pressure 2" value={currentScenario.pressure2} unit="psi" />}
-                      {currentScenario.solveFor !== 'elevation_2' && <PrintTableRow label="Elevation 2" value={currentScenario.elevation2} unit="ft" />}
-                    </>
-                  ) : currentScenario.kind === 'channel' ? (
-                    <>
-                      <PrintTableRow label="Discharge (Q)" value={currentScenario.discharge} unit={currentScenario.units === 'metric' ? 'm³/s' : 'ft³/s'} />
-                      {currentScenario.type === 'irregular' ? (
-                        <PrintTableRow label="Points Count" value={currentScenario.irregularPoints?.length || 0} unit="" />
-                      ) : currentScenario.type === 'gutter' ? (
+              <div className="grid grid-cols-2 gap-8">
+                <section>
+                  <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Inputs</h3>
+                  <table className="w-full text-sm font-sans">
+                    <tbody>
+                      {scenario.kind === 'pressure_pipe' ? (
                         <>
-                          <PrintTableRow label="Gutter Width" value={currentScenario.gutterWidth} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                          <PrintTableRow label="Gutter Cross Slope" value={currentScenario.gutterCrossSlope} unit="ft/ft" />
-                          <PrintTableRow label="Road Cross Slope" value={currentScenario.roadCrossSlope} unit="ft/ft" />
-                          {currentScenario.solveFor === 'discharge' && <PrintTableRow label="Spread" value={currentScenario.spread} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />}
+                          <PrintTableRow label="Solve For" value={scenario.solveFor} unit="" />
+                          <PrintTableRow label="Friction Method" value={scenario.frictionMethod} unit="" />
+                          {scenario.solveFor !== 'discharge' && <PrintTableRow label="Discharge" value={scenario.discharge} unit="cfs" />}
+                          {scenario.solveFor !== 'diameter' && <PrintTableRow label="Diameter" value={scenario.diameter} unit="in" />}
+                          {scenario.solveFor !== 'length' && <PrintTableRow label="Length" value={scenario.length} unit="ft" />}
+                          {scenario.solveFor !== 'pressure_1' && <PrintTableRow label="Pressure 1" value={scenario.pressure1} unit="psi" />}
+                          {scenario.solveFor !== 'elevation_1' && <PrintTableRow label="Elevation 1" value={scenario.elevation1} unit="ft" />}
+                          {scenario.solveFor !== 'pressure_2' && <PrintTableRow label="Pressure 2" value={scenario.pressure2} unit="psi" />}
+                          {scenario.solveFor !== 'elevation_2' && <PrintTableRow label="Elevation 2" value={scenario.elevation2} unit="ft" />}
+                        </>
+                      ) : scenario.kind === 'channel' ? (
+                        <>
+                          <PrintTableRow label="Discharge (Q)" value={scenario.discharge} unit={scenario.units === 'metric' ? 'm³/s' : 'ft³/s'} />
+                          {scenario.type === 'irregular' ? (
+                            <PrintTableRow label="Points Count" value={scenario.irregularPoints?.length || 0} unit="" />
+                          ) : scenario.type === 'gutter' ? (
+                            <>
+                              <PrintTableRow label="Gutter Width" value={scenario.gutterWidth} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                              <PrintTableRow label="Gutter Cross Slope" value={scenario.gutterCrossSlope} unit="ft/ft" />
+                              <PrintTableRow label="Road Cross Slope" value={scenario.roadCrossSlope} unit="ft/ft" />
+                              {scenario.solveFor === 'discharge' && <PrintTableRow label="Spread" value={scenario.spread} unit={scenario.units === 'metric' ? 'm' : 'ft'} />}
+                            </>
+                          ) : (
+                            <>
+                              {scenario.type !== 'triangular' && <PrintTableRow label="Bottom Width (b)" value={scenario.width} unit={scenario.units === 'metric' ? 'm' : 'ft'} />}
+                              {scenario.type !== 'rectangular' && (
+                                <>
+                                  <PrintTableRow label="Left Slope (zL:1)" value={scenario.leftSideSlope} unit="H:V" />
+                                  <PrintTableRow label="Right Slope (zR:1)" value={scenario.rightSideSlope} unit="H:V" />
+                                </>
+                              )}
+                            </>
+                          )}
+                          <PrintTableRow label="Slope (S)" value={scenario.slope} unit={scenario.units === 'metric' ? 'm/m' : 'ft/ft'} />
+                          <PrintTableRow label="Manning's n" value={scenario.manningsN} unit="—" />
                         </>
                       ) : (
                         <>
-                          {currentScenario.type !== 'triangular' && <PrintTableRow label="Bottom Width (b)" value={currentScenario.width} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />}
-                          {currentScenario.type !== 'rectangular' && (
-                            <>
-                              <PrintTableRow label="Left Slope (zL:1)" value={currentScenario.leftSideSlope} unit="H:V" />
-                              <PrintTableRow label="Right Slope (zR:1)" value={currentScenario.rightSideSlope} unit="H:V" />
-                            </>
-                          )}
+                          <PrintTableRow label="Discharge" value={scenario.discharge} unit="cfs" />
+                          <PrintTableRow label="Slope" value={scenario.slope} unit="ft/ft" />
+                          <PrintTableRow label="Gutter Width" value={scenario.gutterWidth} unit="ft" />
+                          <PrintTableRow label="Gutter Cross Slope" value={scenario.gutterCrossSlope} unit="ft/ft" />
+                          <PrintTableRow label="Road Cross Slope" value={scenario.roadCrossSlope} unit="ft/ft" />
+                          <PrintTableRow label="Manning's n" value={scenario.manningsN} unit="—" />
+                          <PrintTableRow label="Curb Opening Length" value={scenario.curbOpeningLength} unit="ft" />
                         </>
                       )}
-                      <PrintTableRow label="Slope (S)" value={currentScenario.slope} unit={currentScenario.units === 'metric' ? 'm/m' : 'ft/ft'} />
-                      <PrintTableRow label="Manning's n" value={currentScenario.manningsN} unit="—" />
-                    </>
-                  ) : (
-                    <>
-                      <PrintTableRow label="Discharge" value={currentScenario.discharge} unit="cfs" />
-                      <PrintTableRow label="Slope" value={currentScenario.slope} unit="ft/ft" />
-                      <PrintTableRow label="Gutter Width" value={currentScenario.gutterWidth} unit="ft" />
-                      <PrintTableRow label="Gutter Cross Slope" value={currentScenario.gutterCrossSlope} unit="ft/ft" />
-                      <PrintTableRow label="Road Cross Slope" value={currentScenario.roadCrossSlope} unit="ft/ft" />
-                      <PrintTableRow label="Manning's n" value={currentScenario.manningsN} unit="—" />
-                      <PrintTableRow label="Curb Opening Length" value={currentScenario.curbOpeningLength} unit="ft" />
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </section>
-            <section>
-              <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Primary Result</h3>
-              <div className="py-2">
-                {currentScenario.kind === 'pressure_pipe' ? (
-                  <>
-                    <p className="text-[9px] uppercase font-sans text-gray-600">
-                      Solved {currentScenario.solveFor.replace('_', ' ')}
-                    </p>
-                    <p className="text-4xl font-bold">
-                      {currentScenario.results ? 
-                        Number(currentScenario.results[currentScenario.solveFor]).toFixed(precision.depth) 
-                        : '0.00'} 
-                      <span className="text-lg font-normal text-gray-500">
-                        {currentScenario.solveFor === 'discharge' ? 'cfs' : 
-                         currentScenario.solveFor === 'diameter' ? 'in' : 
-                         currentScenario.solveFor === 'length' ? 'ft' :
-                         currentScenario.solveFor.includes('pressure') ? 'psi' : 'ft'}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">Headloss: {currentScenario.results?.headloss.toFixed(2)} ft</p>
-                  </>
-                ) : currentScenario.kind === 'channel' ? (
-                  <>
-                    <p className="text-[9px] uppercase font-sans text-gray-600">
-                      {currentScenario.type === 'irregular' ? 'Water Surface Elevation (WSE)' : 
-                       currentScenario.type === 'gutter' ? (currentScenario.solveFor === 'spread' ? 'Spread (T)' : 'Discharge (Q)') :
-                       'Normal Depth (yₙ)'}
-                    </p>
-                    <p className="text-4xl font-bold">
-                      {currentScenario.results ? 
-                        Number(
-                          currentScenario.type === 'irregular' ? (currentScenario.results.waterSurfaceElevation ?? currentScenario.results.depth) : 
-                          currentScenario.type === 'gutter' ? (currentScenario.solveFor === 'spread' ? currentScenario.results.spread : currentScenario.results.discharge) :
-                          currentScenario.results.depth
-                        ).toFixed(currentScenario.type === 'gutter' && currentScenario.solveFor === 'discharge' ? 2 : precision.depth) 
-                        : '0.00'} 
-                      <span className="text-lg font-normal text-gray-500">
-                        {currentScenario.type === 'gutter' && currentScenario.solveFor === 'discharge' ? 
-                          (currentScenario.units === 'metric' ? 'm³/s' : 'ft³/s') : 
-                          (currentScenario.units === 'metric' ? 'm' : 'ft')}
-                      </span>
-                    </p>
-                    {currentScenario.type === 'gutter' && (
-                      <p className="mt-1 text-[10px] font-sans text-gray-500 uppercase tracking-tight">
-                        {currentScenario.solveFor === 'spread' ? 
-                          `Discharge: ${currentScenario.discharge} ${currentScenario.units === 'metric' ? 'm³/s' : 'ft³/s'}` : 
-                          `Spread: ${currentScenario.spread} ${currentScenario.units === 'metric' ? 'm' : 'ft'}`}
-                      </p>
-                    )}
-                    <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">Regime: {currentScenario.results?.flow_regime}</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-[9px] uppercase font-sans text-gray-600">Efficiency</p>
-                    <p className="text-4xl font-bold">
-                      {currentScenario.results ? currentScenario.results.efficiency_percent.toFixed(1) : '0.0'} 
-                      <span className="text-lg font-normal text-gray-500">%</span>
-                    </p>
-                    <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">
-                      Intercepted: {currentScenario.results?.intercepted_flow_cfs.toFixed(2)} cfs
-                    </p>
-                  </>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2 font-sans">
-            <section>
-              <h3 className="text-[10px] font-bold uppercase border-b border-black mb-3 pb-1">Analysis Properties</h3>
-              <table className="w-full text-xs">
-                <tbody>
-                  {currentScenario.kind === 'pressure_pipe' ? (
-                    <>
-                      <PrintTableRow label="Headloss" value={currentScenario.results?.headloss.toFixed(precision.depth)} unit="ft" />
-                      <PrintTableRow label="Velocity" value={currentScenario.results?.velocity.toFixed(precision.velocity)} unit="ft/s" />
-                      <PrintTableRow label="Energy Grade 1" value={currentScenario.results?.energy_grade_1.toFixed(precision.depth)} unit="ft" />
-                      <PrintTableRow label="Energy Grade 2" value={currentScenario.results?.energy_grade_2.toFixed(precision.depth)} unit="ft" />
-                      <PrintTableRow label="Hydraulic Grade 1" value={currentScenario.results?.hydraulic_grade_1.toFixed(precision.depth)} unit="ft" />
-                      <PrintTableRow label="Hydraulic Grade 2" value={currentScenario.results?.hydraulic_grade_2.toFixed(precision.depth)} unit="ft" />
-                      <PrintTableRow label="Friction Slope" value={currentScenario.results?.friction_slope.toFixed(precision.criticalSlope)} unit="ft/ft" />
-                      <PrintTableRow label="Flow Area" value={currentScenario.results?.area.toFixed(precision.area)} unit="ft²" />
-                    </>
-                  ) : currentScenario.kind === 'channel' ? (
-                    <>
-                      <PrintTableRow label="Flow Area (A)" value={currentScenario.results ? Number(currentScenario.results.area).toFixed(precision.area) : '0.00'} unit={currentScenario.units === 'metric' ? 'm²' : 'ft²'} />
-                      <PrintTableRow label="Wetted Perimeter (P)" value={currentScenario.results ? Number(currentScenario.results.wetted_perimeter).toFixed(precision.perimeter) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      <PrintTableRow label="Hydraulic Radius (R)" value={currentScenario.results ? Number(currentScenario.results.hydraulic_radius).toFixed(precision.radius) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      {currentScenario.type === 'gutter' && (
-                        <>
-                          <PrintTableRow label="Spread (T)" value={currentScenario.results ? Number(currentScenario.results.spread).toFixed(precision.depth) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                          <PrintTableRow label="Gutter Depression" value={currentScenario.results ? Number(currentScenario.results.gutter_depression).toFixed(precision.depth) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                          <PrintTableRow label="Depth at Curb" value={currentScenario.results ? Number(currentScenario.results.depth).toFixed(precision.depth) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                        </>
-                      )}
-                      <PrintTableRow label="Top Width (T)" value={currentScenario.results ? Number(currentScenario.results.top_width).toFixed(precision.topWidth) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      <PrintTableRow label="Crit. Depth (yc)" value={currentScenario.results ? Number(currentScenario.results.critical_depth).toFixed(precision.criticalDepth) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      <PrintTableRow label="Crit. Slope (Sc)" value={currentScenario.results ? Number(currentScenario.results.critical_slope).toFixed(precision.criticalSlope) : '0.0000'} unit={currentScenario.units === 'metric' ? 'm/m' : 'ft/ft'} />
-                      <PrintTableRow label="Velocity (V)" value={currentScenario.results ? Number(currentScenario.results.velocity).toFixed(precision.velocity) : '0.00'} unit={currentScenario.units === 'metric' ? 'm/s' : 'ft/s'} />
-                      <PrintTableRow label="Vel. Head (hv)" value={currentScenario.results ? Number(currentScenario.results.velocity_head).toFixed(precision.velocityHead) : '0.000'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      <PrintTableRow label="Spec. Energy (E)" value={currentScenario.results ? Number(currentScenario.results.specific_energy).toFixed(precision.specificEnergy) : '0.00'} unit={currentScenario.units === 'metric' ? 'm' : 'ft'} />
-                      <PrintTableRow label="Froude (Fr)" value={currentScenario.results ? Number(currentScenario.results.froude_number).toFixed(precision.froude) : '0.000'} unit="—" />
-                    </>
-                  ) : (
-                    <>
-                      <PrintTableRow label="Bypass Flow" value={currentScenario.results?.bypass_flow_cfs.toFixed(2)} unit="cfs" />
-                      <PrintTableRow label="Spread" value={currentScenario.results?.spread_ft.toFixed(1)} unit="ft" />
-                      <PrintTableRow label="Depth" value={currentScenario.results?.depth_ft.toFixed(2)} unit="ft" />
-                      <PrintTableRow label="Velocity" value={currentScenario.results?.velocity_fps.toFixed(2)} unit="ft/s" />
-                      <PrintTableRow label="Gutter Depression" value={currentScenario.results?.gutter_depression_in.toFixed(1)} unit="in" />
-                      <PrintTableRow label="Total Depression" value={currentScenario.results?.total_depression_in.toFixed(1)} unit="in" />
-                    </>
-                  )}
-                </tbody>
-              </table>
-            </section>
-            <div className="flex flex-col gap-6">
-              <section className="flex items-center justify-center p-2 border border-gray-100 min-h-[160px]">
-                <ChannelPlot 
-                  type={currentScenario.type} 
-                  width={currentScenario.type === 'gutter' ? currentScenario.gutterWidth : currentScenario.width} 
-                  zL={currentScenario.type === 'gutter' ? currentScenario.gutterCrossSlope : currentScenario.leftSideSlope} 
-                  zR={currentScenario.type === 'gutter' ? currentScenario.roadCrossSlope : currentScenario.rightSideSlope} 
-                  depth={currentScenario.results?.depth || 1} 
-                  points={currentScenario.irregularPoints}
-                  mode="print" 
-                />
-              </section>
-              
-              {currentScenario.notes && (
+                    </tbody>
+                  </table>
+                </section>
                 <section>
-                  <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-2 pb-1">Notes</h3>
-                  <div className="p-3 border border-gray-200 bg-gray-50 text-[11px] whitespace-pre-wrap leading-relaxed break-words overflow-hidden font-sans">
-                    {currentScenario.notes}
+                  <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-3 pb-1">Primary Result</h3>
+                  <div className="py-2">
+                    {scenario.kind === 'pressure_pipe' ? (
+                      <>
+                        <p className="text-[9px] uppercase font-sans text-gray-600">
+                          Solved {scenario.solveFor.replace('_', ' ')}
+                        </p>
+                        <p className="text-4xl font-bold">
+                          {scenario.results ? 
+                            Number(scenario.results[scenario.solveFor]).toFixed(precision.depth) 
+                            : '0.00'} 
+                          <span className="text-lg font-normal text-gray-500">
+                            {scenario.solveFor === 'discharge' ? 'cfs' : 
+                             scenario.solveFor === 'diameter' ? 'in' : 
+                             scenario.solveFor === 'length' ? 'ft' :
+                             scenario.solveFor.includes('pressure') ? 'psi' : 'ft'}
+                          </span>
+                        </p>
+                        <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">Headloss: {scenario.results?.headloss.toFixed(2)} ft</p>
+                      </>
+                    ) : scenario.kind === 'channel' ? (
+                      <>
+                        <p className="text-[9px] uppercase font-sans text-gray-600">
+                          {scenario.type === 'irregular' ? 'Water Surface Elevation (WSE)' : 
+                           scenario.type === 'gutter' ? (scenario.solveFor === 'spread' ? 'Spread (T)' : 'Discharge (Q)') :
+                           'Normal Depth (yₙ)'}
+                        </p>
+                        <p className="text-4xl font-bold">
+                          {scenario.results ? 
+                            Number(
+                              scenario.type === 'irregular' ? (scenario.results.waterSurfaceElevation ?? scenario.results.depth) : 
+                              scenario.type === 'gutter' ? (scenario.solveFor === 'spread' ? scenario.results.spread : scenario.results.discharge) :
+                              scenario.results.depth
+                            ).toFixed(scenario.type === 'gutter' && scenario.solveFor === 'discharge' ? 2 : precision.depth) 
+                            : '0.00'} 
+                          <span className="text-lg font-normal text-gray-500">
+                            {scenario.type === 'gutter' && scenario.solveFor === 'discharge' ? 
+                              (scenario.units === 'metric' ? 'm³/s' : 'ft³/s') : 
+                              (scenario.units === 'metric' ? 'm' : 'ft')}
+                          </span>
+                        </p>
+                        {scenario.type === 'gutter' && (
+                          <p className="mt-1 text-[10px] font-sans text-gray-500 uppercase tracking-tight">
+                            {scenario.solveFor === 'spread' ? 
+                              `Discharge: ${scenario.discharge} ${scenario.units === 'metric' ? 'm³/s' : 'ft³/s'}` : 
+                              `Spread: ${scenario.spread} ${scenario.units === 'metric' ? 'm' : 'ft'}`}
+                          </p>
+                        )}
+                        <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">Regime: {scenario.results?.flow_regime}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[9px] uppercase font-sans text-gray-600">Efficiency</p>
+                        <p className="text-4xl font-bold">
+                          {scenario.results ? scenario.results.efficiency_percent.toFixed(1) : '0.0'} 
+                          <span className="text-lg font-normal text-gray-500">%</span>
+                        </p>
+                        <p className="mt-1 text-[10px] font-sans font-bold uppercase tracking-widest">
+                          Intercepted: {scenario.results?.intercepted_flow_cfs.toFixed(2)} cfs
+                        </p>
+                      </>
+                    )}
                   </div>
                 </section>
-              )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-2 font-sans">
+                <section>
+                  <h3 className="text-[10px] font-bold uppercase border-b border-black mb-3 pb-1">Analysis Properties</h3>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {scenario.kind === 'pressure_pipe' ? (
+                        <>
+                          <PrintTableRow label="Headloss" value={scenario.results?.headloss.toFixed(precision.depth)} unit="ft" />
+                          <PrintTableRow label="Velocity" value={scenario.results?.velocity.toFixed(precision.velocity)} unit="ft/s" />
+                          <PrintTableRow label="Energy Grade 1" value={scenario.results?.energy_grade_1.toFixed(precision.depth)} unit="ft" />
+                          <PrintTableRow label="Energy Grade 2" value={scenario.results?.energy_grade_2.toFixed(precision.depth)} unit="ft" />
+                          <PrintTableRow label="Hydraulic Grade 1" value={scenario.results?.hydraulic_grade_1.toFixed(precision.depth)} unit="ft" />
+                          <PrintTableRow label="Hydraulic Grade 2" value={scenario.results?.hydraulic_grade_2.toFixed(precision.depth)} unit="ft" />
+                          <PrintTableRow label="Friction Slope" value={scenario.results?.friction_slope.toFixed(precision.criticalSlope)} unit="ft/ft" />
+                          <PrintTableRow label="Flow Area" value={scenario.results?.area.toFixed(precision.area)} unit="ft²" />
+                        </>
+                      ) : scenario.kind === 'channel' ? (
+                        <>
+                          <PrintTableRow label="Flow Area (A)" value={scenario.results ? Number(scenario.results.area).toFixed(precision.area) : '0.00'} unit={scenario.units === 'metric' ? 'm²' : 'ft²'} />
+                          <PrintTableRow label="Wetted Perimeter (P)" value={scenario.results ? Number(scenario.results.wetted_perimeter).toFixed(precision.perimeter) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          <PrintTableRow label="Hydraulic Radius (R)" value={scenario.results ? Number(scenario.results.hydraulic_radius).toFixed(precision.radius) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          {scenario.type === 'gutter' && (
+                            <>
+                              <PrintTableRow label="Spread (T)" value={scenario.results ? Number(scenario.results.spread).toFixed(precision.depth) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                              <PrintTableRow label="Gutter Depression" value={scenario.results ? Number(scenario.results.gutter_depression).toFixed(precision.depth) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                              <PrintTableRow label="Depth at Curb" value={scenario.results ? Number(scenario.results.depth).toFixed(precision.depth) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                            </>
+                          )}
+                          <PrintTableRow label="Top Width (T)" value={scenario.results ? Number(scenario.results.top_width).toFixed(precision.topWidth) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          <PrintTableRow label="Crit. Depth (yc)" value={scenario.results ? Number(scenario.results.critical_depth).toFixed(precision.criticalDepth) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          <PrintTableRow label="Crit. Slope (Sc)" value={scenario.results ? Number(scenario.results.critical_slope).toFixed(precision.criticalSlope) : '0.0000'} unit={scenario.units === 'metric' ? 'm/m' : 'ft/ft'} />
+                          <PrintTableRow label="Velocity (V)" value={scenario.results ? Number(scenario.results.velocity).toFixed(precision.velocity) : '0.00'} unit={scenario.units === 'metric' ? 'm/s' : 'ft/s'} />
+                          <PrintTableRow label="Vel. Head (hv)" value={scenario.results ? Number(scenario.results.velocity_head).toFixed(precision.velocityHead) : '0.000'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          <PrintTableRow label="Spec. Energy (E)" value={scenario.results ? Number(scenario.results.specific_energy).toFixed(precision.specificEnergy) : '0.00'} unit={scenario.units === 'metric' ? 'm' : 'ft'} />
+                          <PrintTableRow label="Froude (Fr)" value={scenario.results ? Number(scenario.results.froude_number).toFixed(precision.froude) : '0.000'} unit="—" />
+                        </>
+                      ) : (
+                        <>
+                          <PrintTableRow label="Bypass Flow" value={scenario.results?.bypass_flow_cfs.toFixed(2)} unit="cfs" />
+                          <PrintTableRow label="Spread" value={scenario.results?.spread_ft.toFixed(1)} unit="ft" />
+                          <PrintTableRow label="Depth" value={scenario.results?.depth_ft.toFixed(2)} unit="ft" />
+                          <PrintTableRow label="Velocity" value={scenario.results?.velocity_fps.toFixed(2)} unit="ft/s" />
+                          <PrintTableRow label="Gutter Depression" value={scenario.results?.gutter_depression_in.toFixed(1)} unit="in" />
+                          <PrintTableRow label="Total Depression" value={scenario.results?.total_depression_in.toFixed(1)} unit="in" />
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </section>
+                <div className="flex flex-col gap-6">
+                  <section className="flex items-center justify-center p-2 border border-gray-100 min-h-[160px]">
+                    <ChannelPlot 
+                      type={scenario.type} 
+                      width={scenario.type === 'gutter' ? scenario.gutterWidth : scenario.width} 
+                      zL={scenario.type === 'gutter' ? scenario.gutterCrossSlope : scenario.leftSideSlope} 
+                      zR={scenario.type === 'gutter' ? scenario.roadCrossSlope : scenario.rightSideSlope} 
+                      depth={scenario.results?.depth || 1} 
+                      points={scenario.irregularPoints}
+                      mode="print" 
+                    />
+                  </section>
+                  
+                  {scenario.notes && (
+                    <section>
+                      <h3 className="text-[10px] font-sans font-bold uppercase border-b border-black mb-2 pb-1">Notes</h3>
+                      <div className="p-3 border border-gray-200 bg-gray-50 text-[11px] whitespace-pre-wrap leading-relaxed break-words overflow-hidden font-sans">
+                        {scenario.notes}
+                      </div>
+                    </section>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       </div>
     </div>
